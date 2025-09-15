@@ -1,0 +1,104 @@
+{
+    "api": {
+        "deepseek_api_key": "your_api_key_here",
+        "api_base_url": "https://api.deepseek.com/v1/chat/completions",
+        "model": "deepseek-chat",
+        "temperature": 0.7,
+        "max_tokens": 200,
+        "timeout": 10
+    },
+    "ocr": {
+        "tesseract_path": "D:\\Tesseract-OCR\\tesseract.exe",
+        "tessdata_path": "D:\\Tesseract-OCR\\tessdata",
+        "language": "eng+chi_sim",
+        "detection_interval": 0.1
+    },
+    "detection_areas": {
+        "kill_detection_area": {
+            "x": 100,
+            "y": 100,
+            "width": 200,
+            "height": 50,
+            "enabled": true
+        },
+        "chat_detection_area": {
+            "x": 100,
+            "y": 200,
+            "width": 300,
+            "height": 100,
+            "enabled": true
+        }
+    },
+    "cooldowns": {
+        "kill_cooldown": 5.0,
+        "chat_cooldown": 3.0,
+        "encouragement_cooldown": 10.0
+    },
+    "features": {
+        "encouragement_enabled": true,
+        "auto_response_enabled": true,
+        "kill_detection_enabled": true,
+        "chat_detection_enabled": true,
+        "debug_mode": false
+    },
+    "game": {
+        "game_name": "Dota 2",
+        "window_mode": "windowed",
+        "chat_hotkey": "enter",
+        "team_chat_hotkey": "t"
+    },
+    "encouragement": {
+        "use_ai_generation": true,
+        "ai_prompts": {
+            "kill_prompt": "请为Dota 2游戏中的队友击杀生成一句简短的中文鼓励语，要求积极正面，不超过20字，不要包含{player}占位符，直接输出鼓励语内容。",
+            "death_prompt": "请为Dota 2游戏中的队友死亡生成一句简短的中文安慰语，要求积极正面，不超过20字，不要包含{player}占位符，直接输出安慰语内容。",
+            "general_prompt": "请为Dota 2游戏生成一句简短的中文团队鼓励语，要求积极正面，不超过15字，直接输出鼓励语内容。"
+        },
+        "fallback_messages": {
+            "kill_messages": [
+                "太棒了！完成了一次精彩的击杀！",
+                "干得漂亮！展现出了真正的实力！",
+                "这就是技术！操作让人印象深刻！",
+                "完美！击杀时机把握得恰到好处！",
+                "厉害！让我们看到了真正的游戏技巧！",
+                "精彩！这次击杀太帅了！",
+                "优秀！展现出了职业选手的水准！",
+                "太强了！操作让人叹为观止！"
+            ],
+            "death_messages": [
+                "没关系！下次一定会更好的！",
+                "别灰心！失败是成功之母！",
+                "加油！我们相信你的实力！",
+                "坚持住！胜利就在前方！",
+                "不要放弃！团队需要你！",
+                "振作起来！我们还有机会！",
+                "保持信心！你的技术我们都知道！",
+                "继续努力！下一波团战看你的！"
+            ],
+            "general_messages": [
+                "团队合作最重要！",
+                "保持冷静，我们能赢！",
+                "相信队友，相信团队！",
+                "每一波团战都是机会！",
+                "专注游戏，享受过程！",
+                "沟通是关键，多交流！",
+                "策略比个人技术更重要！",
+                "坚持到底就是胜利！"
+            ]
+        }
+    },
+    "logging": {
+        "log_level": "INFO",
+        "log_file": "bot.log",
+        "max_log_size": 10485760,
+        "backup_count": 5,
+        "console_output": true
+    },
+    "ui": {
+        "window_width": 800,
+        "window_height": 600,
+        "theme": "default",
+        "auto_save": true,
+        "save_interval": 30
+    }
+}

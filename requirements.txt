@@ -1,0 +1,14 @@
+# Python 3.13 兼容版本
+opencv-python>=4.8.0
+pytesseract>=0.3.10
+Pillow>=10.0.0
+requests>=2.31.0
+pyautogui>=0.9.54
+numpy>=1.24.0
+pywin32>=306
+pyperclip>=1.8.2
+
+# 更好的OCR引擎
+easyocr>=1.7.0
+paddlepaddle>=2.5.0
+paddleocr>=2.7.0
