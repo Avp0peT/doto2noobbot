@@ -67,9 +67,6 @@ datdabot/
 └── README.md           # 说明文档
 ```
 
-## 文档
-
-📖 **完整文档**: 查看 [DOCUMENTATION.md](DOCUMENTATION.md) 获取详细的安装指南、使用说明、故障排除和开发文档。
 
 ## 许可证
 
