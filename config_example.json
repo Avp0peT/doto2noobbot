@@ -8,8 +8,8 @@
         "timeout": 10
     },
     "ocr": {
-        "tesseract_path": "D:\\Tesseract-OCR\\tesseract.exe",
-        "tessdata_path": "D:\\Tesseract-OCR\\tessdata",
+        "tesseract_path": "Tesseract-OCR\\tesseract.exe",
+        "tessdata_path": "Tesseract-OCR\\tessdata",
         "language": "eng+chi_sim",
         "detection_interval": 0.1
     },
