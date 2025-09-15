@@ -7,6 +7,7 @@
 ### 1. 安装
 ```bash
 # 运行安装脚本
+cp config_examplpe.json config.json
 install.bat
 ```
 
