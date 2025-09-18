@@ -90,9 +90,7 @@ class DeepSeekAPI:
                     if content and not content.startswith("API请求失败") and not content.startswith("网络请求失败"):
                         # 清理响应，移除可能的引号或多余字符
                         content = content.strip().strip('"').strip("'")
-                        # 限制长度，确保不超过20字
-                        if len(content) > 20:
-                            content = content[:20]
+                        # 移除字符长度限制，允许发送完整消息
                         return content
             else:
                 print(f"API请求失败: {response.status_code} - {response.text}")

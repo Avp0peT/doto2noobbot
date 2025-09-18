@@ -16,7 +16,7 @@ class Config:
         self.default_config = {
             # API配置
             "api": {
-                "deepseek_api_key": "sk-ac6e4e000c0647c2a648fd8886b2bfe7",
+                "deepseek_api_key": "your_api_key_here",
                 "api_base_url": "https://api.deepseek.com/v1/chat/completions",
                 "model": "deepseek-chat",
                 "temperature": 0.7,
@@ -29,8 +29,14 @@ class Config:
                 "tesseract_path": r"D:\Tesseract-OCR\tesseract.exe",
                 "tessdata_path": r"D:\Tesseract-OCR\tessdata",
                 "language": "eng+chi_sim",
-                "detection_interval": 0.1,  # 检测间隔（秒）
-                "engine": "tesseract"  # OCR引擎选择: tesseract, easyocr, paddleocr
+                "detection_interval": 3.0,  # 聊天/击杀采集间隔（秒）
+                "engine": "tesseract",  # OCR引擎选择: tesseract, easyocr, paddleocr
+                "gray_saturation_threshold": 80,
+                "gray_value_min": 30,
+                "portrait_roi_ratio": 0.8,
+                "gray_fraction_threshold": 0.10,
+                "gray_fraction_delta": 0.06,
+                "chat_min_chars": 2
             },
             
             # 检测区域配置
@@ -74,8 +80,7 @@ class Config:
             "game": {
                 "game_name": "Dota 2",
                 "window_mode": "windowed",  # fullscreen, windowed, borderless
-                "chat_hotkey": "enter",  # 聊天快捷键
-                "team_chat_hotkey": "t"  # 团队聊天快捷键
+                "chat_hotkey": "shift+enter"  # 聊天快捷键（示例：shift+enter, enter, t）
             },
             
             # 鼓励语配置
@@ -232,6 +237,67 @@ class Config:
             setattr(self, keys[0], value)
         else:
             config[keys[-1]] = value
+        # 设置后立即保存
+        try:
+            self.save_config()
+        except Exception:
+            pass
+
+    # ====== OCR区域专用便捷API ======
+    def get_ocr_area(self, area_type: str) -> Dict[str, Any]:
+        """获取OCR识别区域配置
+        
+        Args:
+            area_type: 'kill' 或 'chat'
+        Returns:
+            包含 x, y, width, height, enabled 的字典
+        """
+        area_name = f"{area_type}_detection_area"
+        if hasattr(self, 'detection_areas'):
+            areas = getattr(self, 'detection_areas')
+            if hasattr(areas, area_name):
+                area = getattr(areas, area_name)
+                if isinstance(area, dict):
+                    return area
+                # 兼容 ConfigSection
+                return {
+                    'x': getattr(area, 'x', 0),
+                    'y': getattr(area, 'y', 0),
+                    'width': getattr(area, 'width', 100),
+                    'height': getattr(area, 'height', 50),
+                    'enabled': getattr(area, 'enabled', False)
+                }
+            elif isinstance(areas, dict) and area_name in areas:
+                return areas[area_name]
+        # 默认返回
+        return {'x': 0, 'y': 0, 'width': 100, 'height': 50, 'enabled': False}
+
+    def set_ocr_area(self, area_type: str, x: int, y: int, width: int, height: int, enabled: Optional[bool] = True):
+        """设置OCR识别区域并持久化到config.json
+        
+        Args:
+            area_type: 'kill' 或 'chat'
+            x, y, width, height: 区域参数
+            enabled: 是否启用
+        """
+        area_name = f"{area_type}_detection_area"
+        area_config = {
+            'x': int(x),
+            'y': int(y),
+            'width': int(width),
+            'height': int(height),
+            'enabled': bool(enabled)
+        }
+        # 确保 detection_areas 容器存在
+        if not hasattr(self, 'detection_areas'):
+            setattr(self, 'detection_areas', {})
+        areas = getattr(self, 'detection_areas')
+        if hasattr(areas, '__dict__'):
+            setattr(areas, area_name, area_config)
+        elif isinstance(areas, dict):
+            areas[area_name] = area_config
+        # 立即保存
+        self.save_config()
     
     def update_from_dict(self, config_dict: Dict[str, Any]):
         """从字典更新配置"""
@@ -977,9 +1043,6 @@ class ConfigManager:
                                font=("Arial", 8), foreground="gray")
         engine_info.grid(row=5, column=0, columnspan=3, sticky=tk.W, padx=5, pady=2)
         
-        # OCR测试按钮
-        ttk.Button(ocr_tab, text="测试OCR引擎", command=self.test_ocr_engines).grid(row=6, column=0, columnspan=3, pady=10)
-        
     def create_detection_tab(self, parent):
         """创建检测区域配置标签页"""
         detection_tab = ttk.Frame(parent)
@@ -1032,8 +1095,61 @@ class ConfigManager:
         ttk.Button(quick_frame, text="选择聊天检测区域", 
                   command=lambda: self.quick_select_area('chat')).pack(side=tk.LEFT, padx=5, pady=5)
         
+        # 直接编辑区域
+        edit_frame = ttk.LabelFrame(detection_tab, text="直接编辑区域")
+        edit_frame.grid(row=4, column=0, sticky=tk.W+tk.E, padx=5, pady=5)
+        
+        # 击杀区域编辑行
+        kill_edit = ttk.Frame(edit_frame)
+        kill_edit.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Label(kill_edit, text="击杀区域").pack(side=tk.LEFT, padx=(0, 8))
+        kill = self.config.get_ocr_area('kill') if hasattr(self.config, 'get_ocr_area') else {'x':0,'y':0,'width':100,'height':50,'enabled':False}
+        self.kill_x_var = tk.IntVar(value=kill.get('x', 0))
+        self.kill_y_var = tk.IntVar(value=kill.get('y', 0))
+        self.kill_w_var = tk.IntVar(value=kill.get('width', 100))
+        self.kill_h_var = tk.IntVar(value=kill.get('height', 50))
+        self.kill_enabled_var = tk.BooleanVar(value=kill.get('enabled', False))
+        
+        ttk.Label(kill_edit, text="X:").pack(side=tk.LEFT)
+        ttk.Spinbox(kill_edit, from_=0, to=10000, textvariable=self.kill_x_var, width=8).pack(side=tk.LEFT, padx=(0,6))
+        ttk.Label(kill_edit, text="Y:").pack(side=tk.LEFT)
+        ttk.Spinbox(kill_edit, from_=0, to=10000, textvariable=self.kill_y_var, width=8).pack(side=tk.LEFT, padx=(0,6))
+        ttk.Label(kill_edit, text="宽:").pack(side=tk.LEFT)
+        ttk.Spinbox(kill_edit, from_=10, to=10000, textvariable=self.kill_w_var, width=8).pack(side=tk.LEFT, padx=(0,6))
+        ttk.Label(kill_edit, text="高:").pack(side=tk.LEFT)
+        ttk.Spinbox(kill_edit, from_=10, to=10000, textvariable=self.kill_h_var, width=8).pack(side=tk.LEFT, padx=(0,10))
+        ttk.Checkbutton(kill_edit, text="启用检测", variable=self.kill_enabled_var).pack(side=tk.LEFT, padx=(0,10))
+        ttk.Button(kill_edit, text="保存", command=lambda: self.save_area_changes('kill')).pack(side=tk.LEFT)
+        ttk.Button(kill_edit, text="可视化选择", command=lambda: self.quick_select_area('kill')).pack(side=tk.LEFT, padx=(6,0))
+        
+        # 聊天区域编辑行
+        chat_edit = ttk.Frame(edit_frame)
+        chat_edit.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Label(chat_edit, text="聊天区域").pack(side=tk.LEFT, padx=(0, 8))
+        chat = self.config.get_ocr_area('chat') if hasattr(self.config, 'get_ocr_area') else {'x':0,'y':0,'width':100,'height':50,'enabled':False}
+        self.chat_x_var = tk.IntVar(value=chat.get('x', 0))
+        self.chat_y_var = tk.IntVar(value=chat.get('y', 0))
+        self.chat_w_var = tk.IntVar(value=chat.get('width', 100))
+        self.chat_h_var = tk.IntVar(value=chat.get('height', 50))
+        self.chat_enabled_var = tk.BooleanVar(value=chat.get('enabled', False))
+        
+        ttk.Label(chat_edit, text="X:").pack(side=tk.LEFT)
+        ttk.Spinbox(chat_edit, from_=0, to=10000, textvariable=self.chat_x_var, width=8).pack(side=tk.LEFT, padx=(0,6))
+        ttk.Label(chat_edit, text="Y:").pack(side=tk.LEFT)
+        ttk.Spinbox(chat_edit, from_=0, to=10000, textvariable=self.chat_y_var, width=8).pack(side=tk.LEFT, padx=(0,6))
+        ttk.Label(chat_edit, text="宽:").pack(side=tk.LEFT)
+        ttk.Spinbox(chat_edit, from_=10, to=10000, textvariable=self.chat_w_var, width=8).pack(side=tk.LEFT, padx=(0,6))
+        ttk.Label(chat_edit, text="高:").pack(side=tk.LEFT)
+        ttk.Spinbox(chat_edit, from_=10, to=10000, textvariable=self.chat_h_var, width=8).pack(side=tk.LEFT, padx=(0,10))
+        ttk.Checkbutton(chat_edit, text="启用检测", variable=self.chat_enabled_var).pack(side=tk.LEFT, padx=(0,10))
+        ttk.Button(chat_edit, text="保存", command=lambda: self.save_area_changes('chat')).pack(side=tk.LEFT)
+        ttk.Button(chat_edit, text="可视化选择", command=lambda: self.quick_select_area('chat')).pack(side=tk.LEFT, padx=(6,0))
+        
         # 初始化状态显示
         self.refresh_detection_status()
+        # 同步编辑框显示
+        if hasattr(self, 'sync_detection_edit_fields'):
+            self.sync_detection_edit_fields()
         
     def create_area_selection_tab(self, parent):
         """创建区域选择标签页"""
@@ -1213,60 +1329,7 @@ class ConfigManager:
         if dirname:
             self.tessdata_path_var.set(dirname)
     
-    def test_ocr_engines(self):
-        """测试OCR引擎"""
-        try:
-            from advanced_ocr import AdvancedOCR
-            
-            # 创建高级OCR实例
-            ocr = AdvancedOCR(self.config)
-            
-            # 获取可用引擎
-            available_engines = ocr.get_available_engines()
-            
-            if not available_engines:
-                messagebox.showerror("错误", "没有可用的OCR引擎！")
-                return
-            
-            # 创建测试窗口
-            test_window = tk.Toplevel(self.config_window)
-            test_window.title("OCR引擎测试")
-            test_window.geometry("600x400")
-            
-            # 创建文本框显示结果
-            text_frame = ttk.Frame(test_window)
-            text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-            
-            ttk.Label(text_frame, text="OCR引擎测试结果:", font=("Arial", 12, "bold")).pack(anchor=tk.W)
-            
-            result_text = tk.Text(text_frame, height=15, width=70)
-            scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=result_text.yview)
-            result_text.configure(yscrollcommand=scrollbar.set)
-            
-            result_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-            
-            # 显示可用引擎信息
-            result_text.insert(tk.END, f"可用OCR引擎: {', '.join(available_engines)}\n\n")
-            
-            for engine_name in available_engines:
-                info = ocr.get_engine_info(engine_name)
-                result_text.insert(tk.END, f"引擎: {info.get('name', engine_name)}\n")
-                result_text.insert(tk.END, f"描述: {info.get('description', 'N/A')}\n")
-                result_text.insert(tk.END, f"支持语言: {', '.join(info.get('languages', []))}\n")
-                result_text.insert(tk.END, f"状态: {'可用' if info.get('available', False) else '不可用'}\n")
-                result_text.insert(tk.END, "-" * 50 + "\n")
-            
-            result_text.insert(tk.END, "\n推荐设置:\n")
-            result_text.insert(tk.END, "- 中文识别: 推荐使用 easyocr 或 paddleocr\n")
-            result_text.insert(tk.END, "- 英文识别: 推荐使用 tesseract\n")
-            result_text.insert(tk.END, "- 混合语言: 推荐使用 easyocr\n")
-            
-            # 添加关闭按钮
-            ttk.Button(test_window, text="关闭", command=test_window.destroy).pack(pady=10)
-            
-        except Exception as e:
-            messagebox.showerror("错误", f"OCR引擎测试失败: {e}")
+    
     
     def open_area_manager(self):
         """打开区域管理器"""
@@ -1283,6 +1346,72 @@ class ConfigManager:
         # 等待选择完成
         self.config_window.after(100, self.refresh_area_status)
         self.config_window.after(100, self.refresh_detection_status)
+        self.config_window.after(120, self.sync_detection_edit_fields)
+
+    def save_area_changes(self, area_type: str):
+        """从编辑框保存区域设置到配置并写盘"""
+        try:
+            if area_type == 'kill':
+                x = self.kill_x_var.get()
+                y = self.kill_y_var.get()
+                w = self.kill_w_var.get()
+                h = self.kill_h_var.get()
+                enabled = self.kill_enabled_var.get()
+            else:
+                x = self.chat_x_var.get()
+                y = self.chat_y_var.get()
+                w = self.chat_w_var.get()
+                h = self.chat_h_var.get()
+                enabled = self.chat_enabled_var.get()
+            
+            if w < 10 or h < 10:
+                messagebox.showwarning("警告", "宽和高必须至少为10")
+                return
+            
+            if hasattr(self.config, 'set_ocr_area'):
+                self.config.set_ocr_area(area_type, x, y, w, h, enabled)
+            else:
+                # 回退：直接写入对象并保存
+                area_name = f"{area_type}_detection_area"
+                if hasattr(self.config, 'detection_areas'):
+                    areas = getattr(self.config, 'detection_areas')
+                    area_cfg = {'x': x, 'y': y, 'width': w, 'height': h, 'enabled': enabled}
+                    if hasattr(areas, '__dict__'):
+                        setattr(areas, area_name, area_cfg)
+                    elif isinstance(areas, dict):
+                        areas[area_name] = area_cfg
+                    if hasattr(self.config, 'save_config'):
+                        self.config.save_config()
+            
+            self.refresh_detection_status()
+            self.refresh_area_status()
+            messagebox.showinfo("成功", ("击杀" if area_type=='kill' else "聊天") + "区域已保存")
+        except Exception as e:
+            messagebox.showerror("错误", f"保存区域失败: {e}")
+
+    def sync_detection_edit_fields(self):
+        """同步编辑框值为最新配置"""
+        try:
+            if hasattr(self.config, 'get_ocr_area'):
+                k = self.config.get_ocr_area('kill')
+                c = self.config.get_ocr_area('chat')
+            else:
+                k = {}
+                c = {}
+            if hasattr(self, 'kill_x_var'):
+                self.kill_x_var.set(k.get('x', 0))
+                self.kill_y_var.set(k.get('y', 0))
+                self.kill_w_var.set(k.get('width', 100))
+                self.kill_h_var.set(k.get('height', 50))
+                self.kill_enabled_var.set(k.get('enabled', False))
+            if hasattr(self, 'chat_x_var'):
+                self.chat_x_var.set(c.get('x', 0))
+                self.chat_y_var.set(c.get('y', 0))
+                self.chat_w_var.set(c.get('width', 100))
+                self.chat_h_var.set(c.get('height', 50))
+                self.chat_enabled_var.set(c.get('enabled', False))
+        except Exception:
+            pass
     
     def refresh_detection_status(self):
         """刷新检测区域状态显示"""
@@ -1464,34 +1593,78 @@ class ConfigManager:
         self.refresh_detection_status()
         self.refresh_area_status()
 
-# 测试入口
 if __name__ == "__main__":
-    # 创建测试窗口
+    # 配置操作面板
     root = tk.Tk()
-    root.title("配置系统测试")
-    root.geometry("400x200")
+    root.title("配置操作面板")
+    root.geometry("420x260")
     
-    # 创建配置实例
-    config = Config()
+    cfg = Config()
     
-    # 创建测试界面
-    frame = ttk.Frame(root)
-    frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    main_frame = ttk.Frame(root)
+    main_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
     
-    # 测试按钮
-    ttk.Button(frame, text="打开配置管理窗口", 
-              command=lambda: ConfigManager(root, config).show_config_window()).pack(pady=10)
+    # 按钮区
+    btns = ttk.Frame(main_frame)
+    btns.pack(fill=tk.X, pady=6)
     
-    ttk.Button(frame, text="测试配置验证", 
-              command=lambda: messagebox.showinfo("验证结果", 
-              "配置验证通过！" if config.validate_config() else "配置验证失败！")).pack(pady=5)
+    def open_config_manager():
+        try:
+            manager = ConfigManager(root, cfg)
+            manager.show_config_window()
+        except Exception as e:
+            messagebox.showerror("错误", f"打开配置管理器失败: {e}")
     
-    ttk.Button(frame, text="导出配置", 
-              command=lambda: config.export_config("test_config.json")).pack(pady=5)
+    def open_area_manager():
+        try:
+            am = AreaManager(root, cfg)
+            am.show_area_manager()
+        except Exception as e:
+            messagebox.showerror("错误", f"打开区域管理器失败: {e}")
     
-    # 状态显示
-    status_label = ttk.Label(frame, text="点击按钮测试配置系统功能")
-    status_label.pack(pady=10)
+    def quick_pick(area_type: str):
+        try:
+            picker = AreaPicker(root, cfg, area_type)
+            picker.start_picking()
+        except Exception as e:
+            messagebox.showerror("错误", f"选择区域失败: {e}")
     
-    # 启动主循环
+    ttk.Button(btns, text="打开配置管理器", command=open_config_manager).pack(side=tk.LEFT, padx=5)
+    ttk.Button(btns, text="打开区域管理器", command=open_area_manager).pack(side=tk.LEFT, padx=5)
+    
+    # 快速选择
+    quick = ttk.LabelFrame(main_frame, text="快速区域操作")
+    quick.pack(fill=tk.X, pady=10)
+    ttk.Button(quick, text="选择击杀区域", command=lambda: quick_pick('kill')).pack(side=tk.LEFT, padx=5, pady=6)
+    ttk.Button(quick, text="选择聊天区域", command=lambda: quick_pick('chat')).pack(side=tk.LEFT, padx=5, pady=6)
+    
+    # 当前区域展示
+    info = ttk.LabelFrame(main_frame, text="当前区域")
+    info.pack(fill=tk.BOTH, expand=True)
+    info_text = tk.Text(info, height=6, width=48)
+    sb = ttk.Scrollbar(info, orient=tk.VERTICAL, command=info_text.yview)
+    info_text.configure(yscrollcommand=sb.set)
+    info_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    sb.pack(side=tk.RIGHT, fill=tk.Y)
+    
+    def refresh_info():
+        try:
+            kill_area = cfg.get_ocr_area('kill') if hasattr(cfg, 'get_ocr_area') else {}
+            chat_area = cfg.get_ocr_area('chat') if hasattr(cfg, 'get_ocr_area') else {}
+            text = "当前区域配置:\n\n"
+            text += f"击杀区域: x={kill_area.get('x',0)}, y={kill_area.get('y',0)}, w={kill_area.get('width',0)}, h={kill_area.get('height',0)}, 启用={kill_area.get('enabled',False)}\n"
+            text += f"聊天区域: x={chat_area.get('x',0)}, y={chat_area.get('y',0)}, w={chat_area.get('width',0)}, h={chat_area.get('height',0)}, 启用={chat_area.get('enabled',False)}\n"
+            info_text.delete('1.0', tk.END)
+            info_text.insert(tk.END, text)
+        except Exception as e:
+            info_text.delete('1.0', tk.END)
+            info_text.insert(tk.END, f"读取失败: {e}")
+    
+    # 操作区
+    ops = ttk.Frame(main_frame)
+    ops.pack(fill=tk.X, pady=6)
+    ttk.Button(ops, text="刷新", command=refresh_info).pack(side=tk.LEFT, padx=5)
+    ttk.Button(ops, text="退出", command=root.destroy).pack(side=tk.RIGHT, padx=5)
+    
+    refresh_info()
     root.mainloop()

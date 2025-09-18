@@ -44,8 +44,9 @@
     "game": {
         "game_name": "Dota 2",
         "window_mode": "windowed",
-        "chat_hotkey": "enter",
-        "team_chat_hotkey": "t"
+        "chat_hotkey": "enter-shift",
+        "team_chat_hotkey": "enter-shift",
+        "ui_chat_hotkey": "shift+enter"
     },
     "encouragement": {
         "use_ai_generation": true,

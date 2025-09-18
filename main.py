@@ -7,6 +7,7 @@ from tkinter import ttk, messagebox, scrolledtext
 import threading
 import time
 import pyautogui
+import keyboard
 from config import Config, ConfigManager, AreaPicker, AreaManager
 from ocr_detector import OCRDetector
 from deepseek_api import DeepSeekAPI
@@ -31,6 +32,10 @@ class DotaChatBot:
         self.running = False
         self.detection_thread = None
         
+        # 聊天功能状态
+        self.chat_enabled = True  # 聊天功能开启状态
+        self.hotkey_thread = None  # 热键监听线程
+        
         # 聊天间隔控制
         self.last_chat_time = 0
         
@@ -39,6 +44,9 @@ class DotaChatBot:
         
         # 启动检测线程
         self.start_detection()
+        
+        # 启动热键监听
+        self.start_hotkey_listener()
         
     def create_ui(self):
         """创建用户界面"""
@@ -73,6 +81,15 @@ class DotaChatBot:
         
         self.status_label = ttk.Label(status_frame, text="状态: 已停止", foreground="red")
         self.status_label.pack(pady=5)
+        
+        # 聊天功能状态指示器
+        self.chat_status_label = ttk.Label(status_frame, text="聊天功能: 开启", foreground="green")
+        self.chat_status_label.pack(pady=2)
+        
+        # 热键提示
+        hotkey_hint = ttk.Label(status_frame, text="💡 左Shift+Enter 开启对话，Enter 关闭对话", 
+                               font=("Arial", 8), foreground="gray")
+        hotkey_hint.pack(pady=2)
         
         # 控制按钮
         control_frame = ttk.Frame(main_tab)
@@ -125,6 +142,12 @@ class DotaChatBot:
         self.message_entry = ttk.Entry(manual_frame, width=50)
         self.message_entry.pack(fill=tk.X, padx=5, pady=2)
         self.message_entry.bind('<Return>', self.send_manual_message)
+        self.message_entry.bind('<Shift-Return>', self.send_manual_message)
+        
+        # 添加快捷键说明
+        hotkey_label = ttk.Label(manual_frame, text="💡 提示：按 Enter 或 Shift+Enter 发送消息", 
+                                font=("Arial", 8), foreground="gray")
+        hotkey_label.pack(anchor=tk.W, padx=5, pady=(0, 5))
         
         ttk.Button(manual_frame, text="发送消息", 
                   command=self.send_manual_message).pack(anchor=tk.W, padx=5, pady=5)
@@ -323,8 +346,8 @@ class DotaChatBot:
                     try:
                         # 只有在游戏窗口激活时才进行检测
                         if self.is_game_window_active():
-                            if detection_cycle == 0:
-                                # 检测聊天区域
+                            if detection_cycle == 0 and self.chat_enabled:
+                                # 检测聊天区域（仅在聊天功能开启时）
                                 self.log_message("=== 检测聊天区域 ===")
                                 chat_event = self.ocr_detector.detect_chat_message()
                                 if chat_event:
@@ -375,8 +398,7 @@ class DotaChatBot:
                 # 生成鼓励语
                 encouragement = self.deepseek_api.generate_encouragement('kill')
                 if encouragement:
-                    self.send_chat_message(encouragement)
-                    self.log_message(f"发送鼓励语: {encouragement}")
+                    self.send_message(encouragement, "encouragement")
                 
         
         elif event['type'] == 'death':
@@ -386,8 +408,7 @@ class DotaChatBot:
                 # 生成安慰语
                 encouragement = self.deepseek_api.generate_encouragement('death')
                 if encouragement:
-                    self.send_chat_message(encouragement)
-                    self.log_message(f"发送安慰语: {encouragement}")
+                    self.send_message(encouragement, "encouragement")
                 
     
     def handle_chat_event(self, event):
@@ -406,6 +427,11 @@ class DotaChatBot:
         self.log_message(f"包含中文字符: {'是' if has_chinese else '否'}")
         self.log_message(f"文本长度: {len(raw_text)} 字符")
         
+        # 检查各种状态
+        self.log_message(f"=== 状态检查 ===")
+        self.log_message(f"聊天功能状态: {'开启' if self.chat_enabled else '关闭'}")
+        self.log_message(f"自动回复状态: {'开启' if self.auto_response_var.get() else '关闭'}")
+        
         # 将OCR识别结果直接传递给DeepSeek进行对话
         if self.auto_response_var.get():
             # 优先使用中文内容，如果没有中文则使用原始文本
@@ -418,8 +444,7 @@ class DotaChatBot:
                 response = self.ocr_chat_with_ai(input_text)
                 if response and not response.startswith("API请求失败"):
                     self.log_message(f"OCR对话回复: {response}")
-                    self.send_chat_message(response)
-                    self.log_message(f"✓ 已发送OCR对话回复到游戏")
+                    self.send_message(response, "response")
                 else:
                     self.log_message(f"✗ OCR对话回复生成失败: {response}")
             else:
@@ -433,7 +458,7 @@ class DotaChatBot:
         """使用OCR识别结果与DeepSeek进行对话"""
         try:
             # 使用默认的OCR对话prompt
-            prompt = "你是一个专业的Dota 2游戏助手。请根据OCR识别到的游戏内容进行智能回复。要求：1. 回复要简洁有力，不超过30字；2. 使用专业游戏术语；3. 保持积极正面的态度；4. 针对识别到的内容给出合适的建议或回应。"
+            prompt = "你是一个欠揍的猫娘，请用阴阳怪气的语气回复玩家"
             
             # 构建用户消息
             user_message = f"请根据以下OCR识别内容进行智能回复：\n{ocr_text}"
@@ -442,10 +467,7 @@ class DotaChatBot:
             response = self.deepseek_api._make_api_request(user_message, prompt)
             
             if response and not response.startswith("API请求失败"):
-                # 限制回复长度
-                max_length = 30
-                if len(response) > max_length:
-                    response = response[:max_length] + "..."
+                # 移除字符长度限制，允许发送完整消息
                 return response
             else:
                 return f"OCR对话失败: {response}"
@@ -485,79 +507,164 @@ class DotaChatBot:
             self.log_message(f"窗口检测失败: {e}")
             return False
     
-    def send_chat_message(self, message):
-        """发送聊天消息到游戏 - 使用剪切板粘贴方式，带聊天间隔控制"""
+    def send_message(self, message, message_type="chat"):
+        """统一消息发送接口
+        
+        Args:
+            message (str): 要发送的消息内容
+            message_type (str): 消息类型 ("chat", "encouragement", "response")
+        """
+        if not message or not message.strip():
+            self.log_message("⚠ 消息内容为空，跳过发送")
+            return False
+            
         try:
+            # 检查聊天功能是否开启（仅对手动发送的消息检查）
+            if message_type == "manual" and not self.chat_enabled:
+                self.log_message("⚠ 聊天功能已关闭，跳过发送消息")
+                return False
+            
             # 检查聊天间隔
-            current_time = time.time()
-            min_interval = getattr(self.config.cooldowns, 'min_chat_interval', 2.0)
-            if current_time - self.last_chat_time < min_interval:
-                remaining_time = min_interval - (current_time - self.last_chat_time)
-                self.log_message(f"聊天间隔未到，还需等待 {remaining_time:.1f} 秒")
-                return
+            if not self._check_chat_interval():
+                return False
             
-            # 检查游戏窗口是否激活
-            if not self.is_game_window_active():
-                self.log_message("游戏窗口未激活，跳过发送消息")
-                return
+            # 检查游戏窗口
+            if not self._check_game_window():
+                return False
             
-            # 再次确认游戏窗口激活（双重检查）
-            time.sleep(0.1)
-            if not self.is_game_window_active():
-                self.log_message("游戏窗口检测失败，取消发送消息")
-                return
+            # 发送消息到游戏
+            self.log_message(f"准备发送{message_type}消息: {message}")
+            success = self._send_to_game(message)
             
-            chat_mode = getattr(self, 'chat_mode_var', None)
-            if chat_mode:
-                chat_mode = chat_mode.get()
+            if success:
+                self.last_chat_time = time.time()
+                self.log_message(f"✓ {message_type}消息发送成功")
+                return True
             else:
-                chat_mode = "enter"  # 默认使用Enter键模式
-            
-            self.log_message(f"准备发送消息到游戏: {message}")
-            
-            if chat_mode == "enter":
-                # Enter键聊天模式 - 快速流程
-                # 1. 将消息复制到剪切板
-                self.copy_to_clipboard(message)
-                time.sleep(0.05)  # 减少等待时间
+                self.log_message(f"✗ {message_type}消息发送失败")
+                return False
                 
-                # 2. 按Enter键打开聊天框
-                pyautogui.press('enter')
-                time.sleep(0.2)  # 减少等待时间
-                
-                # 3. 直接粘贴消息
-                pyautogui.hotkey('ctrl', 'v')  # 粘贴
-                time.sleep(0.1)  # 减少等待时间
-                
-                # 4. 按Enter键发送并关闭对话框
-                pyautogui.press('enter')
-                time.sleep(0.1)  # 减少等待时间
-            elif chat_mode == "fast":
-                # 超快速模式 - 最小延迟
-                # 1. 将消息复制到剪切板
-                self.copy_to_clipboard(message)
-                
-                # 2. 按Enter键打开聊天框
-                pyautogui.press('enter')
-                time.sleep(0.1)  # 最小等待时间
-                
-                # 3. 直接粘贴消息
-                pyautogui.hotkey('ctrl', 'v')  # 粘贴
-                
-                # 4. 按Enter键发送并关闭对话框
-                pyautogui.press('enter')
-            else:
-                # 直接输入模式 - 也使用剪切板
-                self.copy_to_clipboard(message)
-                time.sleep(0.1)
-                pyautogui.hotkey('ctrl', 'v')  # 粘贴
-                pyautogui.press('enter')
-            
-            # 更新最后聊天时间
-            self.last_chat_time = time.time()
-            self.log_message(f"✓ 消息已发送到游戏: {message}")
         except Exception as e:
-            self.log_message(f"发送消息失败: {e}")
+            self.log_message(f"发送{message_type}消息失败: {e}")
+            return False
+    
+    def _check_chat_interval(self):
+        """检查聊天间隔"""
+        current_time = time.time()
+        min_interval = self._get_config_value('cooldowns', 'min_chat_interval', 2.0)
+        if current_time - self.last_chat_time < min_interval:
+            remaining_time = min_interval - (current_time - self.last_chat_time)
+            self.log_message(f"聊天间隔未到，还需等待 {remaining_time:.1f} 秒")
+            return False
+        return True
+    
+    def _check_game_window(self):
+        """检查游戏窗口状态"""
+        if not self.is_game_window_active():
+            self.log_message("游戏窗口未激活，跳过发送消息")
+            return False
+        
+        # 双重检查
+        time.sleep(0.1)
+        if not self.is_game_window_active():
+            self.log_message("游戏窗口检测失败，取消发送消息")
+            return False
+        return True
+    
+    def _send_to_game(self, message):
+        """发送消息到游戏的具体实现"""
+        try:
+            # 获取聊天模式
+            chat_mode = self._get_chat_mode()
+            
+            # 获取聊天快捷键配置
+            chat_hotkey = self._get_config_value('game', 'chat_hotkey', 'enter')
+            team_chat_hotkey = self._get_config_value('game', 'team_chat_hotkey', 't')
+            
+            # 复制到剪切板
+            self.copy_to_clipboard(message)
+            
+            # 根据模式发送
+            if chat_mode == "fast":
+                # 超快速模式
+                self._press_chat_hotkey(chat_hotkey)
+                time.sleep(0.1)
+                pyautogui.hotkey('ctrl', 'v')
+                self._press_chat_hotkey(chat_hotkey)
+            else:
+                # 标准模式
+                self._press_chat_hotkey(chat_hotkey)
+                time.sleep(0.2)
+                pyautogui.hotkey('ctrl', 'v')
+                time.sleep(0.1)
+                self._press_chat_hotkey(chat_hotkey)
+                time.sleep(0.1)
+            
+            return True
+        except Exception as e:
+            self.log_message(f"游戏发送失败: {e}")
+            return False
+    
+    def _press_chat_hotkey(self, hotkey):
+        """按下聊天快捷键
+        
+        Args:
+            hotkey (str): 快捷键字符串，如 'enter', 'enter-shift', 't' 等
+        """
+        try:
+            if hotkey == 'enter-shift' or hotkey == 'shift+enter':
+                # 左Shift+Enter组合键
+                pyautogui.hotkey('shift', 'enter')
+            elif hotkey == 'enter':
+                # 普通Enter键
+                pyautogui.press('enter')
+            elif hotkey == 't':
+                # T键（团队聊天）
+                pyautogui.press('t')
+            else:
+                # 其他单键
+                pyautogui.press(hotkey)
+        except Exception as e:
+            self.log_message(f"按下快捷键失败: {e}")
+    
+    def _get_chat_mode(self):
+        """获取当前聊天模式"""
+        chat_mode = getattr(self, 'chat_mode_var', None)
+        if chat_mode:
+            return chat_mode.get()
+        return "enter"  # 默认模式
+    
+    def _get_config_value(self, section, key, default=None):
+        """安全获取配置值
+        
+        Args:
+            section (str): 配置节名称
+            key (str): 配置键名
+            default: 默认值
+        Returns:
+            配置值或默认值
+        """
+        if hasattr(self.config, section):
+            section_obj = getattr(self.config, section)
+            return getattr(section_obj, key, default)
+        return default
+    
+    def _check_detection_area(self, area_type):
+        """检查检测区域是否设置
+        
+        Args:
+            area_type (str): 区域类型 ("chat" 或 "kill")
+        Returns:
+            bool: 区域是否已设置
+        """
+        area_name = f"{area_type}_detection_area"
+        area = self._get_config_value('detection_areas', area_name, {})
+        
+        if not area.get('enabled', False):
+            area_display_name = "聊天检测" if area_type == "chat" else "击杀检测"
+            self.log_message(f"⚠ {area_display_name}区域未设置，请先设置{area_display_name}区域")
+            return False
+        return True
     
     def copy_to_clipboard(self, text):
         """将文本复制到剪切板 - 优化版本"""
@@ -596,7 +703,7 @@ class DotaChatBot:
         """发送手动输入的消息"""
         message = self.message_entry.get().strip()
         if message:
-            self.send_chat_message(message)
+            self.send_message(message, "manual")
             self.message_entry.delete(0, tk.END)
     
     def test_game_window(self):
@@ -621,14 +728,16 @@ class DotaChatBot:
                 return
             
             # 检查聊天检测区域是否设置
-            chat_area = getattr(self.config.detection_areas, 'chat_detection_area', {}) if hasattr(self.config, 'detection_areas') else {}
-            if not chat_area.get('enabled', False):
-                self.log_message("⚠ 聊天检测区域未设置，请先设置聊天检测区域")
+            if not self._check_detection_area('chat'):
                 return
             
             self.log_message("正在检测聊天区域中的文字...")
             
-            # 检测聊天消息
+            # 检测聊天消息（仅在聊天功能开启时）
+            if not self.chat_enabled:
+                self.log_message("⚠ 聊天功能已关闭，无法进行聊天检测")
+                return
+                
             chat_event = self.ocr_detector.detect_chat_message()
             if chat_event:
                 self.log_message("✓ 检测到聊天内容，开始处理...")
@@ -654,12 +763,9 @@ class DotaChatBot:
                 return
             
             # 检查击杀检测区域是否设置
-            kill_area = getattr(self.config.detection_areas, 'kill_detection_area', {}) if hasattr(self.config, 'detection_areas') else {}
-            if not kill_area.get('enabled', False):
-                self.log_message("⚠ 击杀检测区域未设置，请先设置击杀检测区域")
+            if not self._check_detection_area('kill'):
                 return
             
-            self.log_message("✓ 击杀检测区域已设置")
             self.log_message("正在检测击杀区域中的字符...")
             
             # 检测击杀事件
@@ -694,12 +800,11 @@ class DotaChatBot:
                 return
             
             # 检查聊天检测区域是否设置
-            chat_area = getattr(self.config.detection_areas, 'chat_detection_area', {}) if hasattr(self.config, 'detection_areas') else {}
-            if not chat_area.get('enabled', False):
-                self.log_message("⚠ 聊天检测区域未设置，请先设置聊天检测区域")
+            if not self._check_detection_area('chat'):
                 return
             
-            self.log_message("✓ 聊天检测区域已设置")
+            # 获取聊天区域信息用于显示
+            chat_area = getattr(self.config.detection_areas, 'chat_detection_area', {}) if hasattr(self.config, 'detection_areas') else {}
             self.log_message(f"聊天区域坐标: ({chat_area.get('x', 0)}, {chat_area.get('y', 0)})")
             self.log_message(f"聊天区域大小: {chat_area.get('width', 0)}x{chat_area.get('height', 0)}")
             
@@ -720,7 +825,11 @@ class DotaChatBot:
             
             self.log_message("正在检测聊天区域中的内容...")
             
-            # 检测聊天消息
+            # 检测聊天消息（仅在聊天功能开启时）
+            if not self.chat_enabled:
+                self.log_message("⚠ 聊天功能已关闭，无法进行OCR对话")
+                return
+                
             chat_event = self.ocr_detector.detect_chat_message()
             if chat_event:
                 self.log_message("✓ 检测到聊天内容，开始OCR对话...")
@@ -938,9 +1047,59 @@ OCR配置:
         
         self.config_info_text.insert(tk.END, info)
     
+    def start_hotkey_listener(self):
+        """启动热键监听线程"""
+        def hotkey_listener():
+            try:
+                # 监听左Shift+Enter组合键开启对话
+                keyboard.add_hotkey('left shift+enter', self.enable_chat_function)
+                # 监听Enter键关闭对话
+                keyboard.add_hotkey('enter', self.disable_chat_function)
+                self.log_message("✓ 热键监听已启动：左Shift+Enter 开启对话，Enter 关闭对话")
+            except Exception as e:
+                self.log_message(f"热键监听启动失败: {e}")
+        
+        self.hotkey_thread = threading.Thread(target=hotkey_listener, daemon=True)
+        self.hotkey_thread.start()
+    
+    def enable_chat_function(self):
+        """开启聊天功能"""
+        self.chat_enabled = True
+        self.log_message("🔄 聊天功能已开启")
+        
+        # 更新界面状态指示器
+        if hasattr(self, 'chat_status_label'):
+            self.chat_status_label.config(text="聊天功能: 开启", foreground="green")
+    
+    def disable_chat_function(self):
+        """关闭聊天功能"""
+        self.chat_enabled = False
+        self.log_message("🔄 聊天功能已关闭")
+        
+        # 更新界面状态指示器
+        if hasattr(self, 'chat_status_label'):
+            self.chat_status_label.config(text="聊天功能: 关闭", foreground="red")
+    
+    def toggle_chat_function(self):
+        """切换聊天功能开启/关闭状态（备用方法）"""
+        self.chat_enabled = not self.chat_enabled
+        status = "开启" if self.chat_enabled else "关闭"
+        self.log_message(f"🔄 聊天功能已{status}")
+        
+        # 更新界面状态指示器（如果存在）
+        if hasattr(self, 'chat_status_label'):
+            self.chat_status_label.config(text=f"聊天功能: {status}")
+    
     def run(self):
         """运行主程序"""
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        finally:
+            # 程序退出时清理热键监听
+            try:
+                keyboard.unhook_all()
+            except:
+                pass
 
 if __name__ == "__main__":
     app = DotaChatBot()
